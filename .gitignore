@@ -5,6 +5,7 @@ sftp-config.json
 !.php-cs-fixer.dist.php
 /.idea
 /coverage
+/.phpintel
 /.split
 /composer.lock
 .php-cs-fixer.cache
@@ -12,3 +13,4 @@ sftp-config.json
 cghooks.lock
 .vercel/
 docs
+

@@ -108,14 +108,42 @@ abstract class AccessToken implements AccessTokenInterface
     public function getToken(bool $refresh = false): array
     {
         $cacheKey = $this->getCacheKey();
+
+        /**
+         * @var Symfony\Component\Cache\Psr16Cache
+         */
         $cache = $this->getCache();
 
-        if (!$refresh && $cache->has($cacheKey) && $result = $cache->get($cacheKey)) {
+        if (! $refresh && $cache->has($cacheKey) && $result = $cache->get($cacheKey)) {
             return $result;
         }
 
-        /** @var array $token */
+        $isLaravel = function_exists('app') &&
+             function_exists('config') &&
+             class_exists(\Illuminate\Support\Facades\Cache::class) &&
+             method_exists(\Illuminate\Support\Facades\Cache::class, 'lock');
+
+        if ($isLaravel) {
+            return \Illuminate\Support\Facades\Cache::lock('wechat:token:' . $cacheKey, 10)
+                ->block(5, function () use ($cacheKey, $cache) {
+                    if ($cache->has($cacheKey) && $result = $cache->get($cacheKey)) {
+                        return $result;
+                    }
+
+                    return $this->refreshAndCacheToken();
+                });
+        }
+
+        return $this->refreshAndCacheToken();
+    }
+
+    protected function refreshAndCacheToken(): array
+    {
         $token = $this->requestToken($this->getCredentials(), true);
+
+        if (empty($token[$this->tokenKey])) {
+            throw new \Exception(sprintf('Failed to get access token in %s', static::class));
+        }
 
         $this->setToken($token[$this->tokenKey], $token['expires_in'] ?? 7200);
 
@@ -183,7 +211,16 @@ abstract class AccessToken implements AccessTokenInterface
         $formatted = $this->castResponseToType($response, $this->app['config']->get('response_type'));
 
         if (empty($result[$this->tokenKey])) {
-            throw new HttpException('Request access_token fail: '.json_encode($result, JSON_UNESCAPED_UNICODE), $response, $formatted);
+            throw new HttpException(
+                sprintf(
+                    'Request access_token fail in %s: %s [endopoint: %s]',
+                    static::class,
+                    json_encode($result, JSON_UNESCAPED_UNICODE),
+                    $this->getEndpoint()
+                ),
+                $response,
+                $formatted
+            );
         }
 
         return $toArray ? $result : $formatted;
